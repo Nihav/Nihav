@@ -1,1 +1,1 @@
-# Nihav
+Contains a collection of projects and code that I have worked on over my PhD. Two particular pieces of code are highlighted; a Markov chain stepping model I developed to understand what drives stepping patterns observed in human subject running experiments on custom-designed uneven terrain, and a large ensemble Monte Carlo simulation I developed to explore the dynamics of running on uneven terrain using a simple, mathematical model.

@@ -1,3 +1,10 @@
+# This code generates stepping locations using a Markov Chain Monte Carlo model.
+# The output of the code are histograms of slope of the stepping model under two
+# stepping schemes; directed scheme where the runner aims to land on flatter patches 
+# of the terrain, and the uniformly random blind scheme. These are compared to experimental
+# data on stepping locations that I collected from human subject experiments.
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.io as spio

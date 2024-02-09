@@ -1,5 +1,6 @@
 # This code uses tracked ant path data and estimates ant trails/trajectories at percentile cut-off periods within the trial by calculating occupancy histograms for ants on the board, finding and joining peaks of the histograms.
 # Then the code calculates the mean distance between the estimated trails/trajectories and ant paths that start after the percentile cut-off time. These are then collated into median and interquartile range of distance scores across all ants and all trials.
+# Find data to run this code at https://drive.google.com/drive/folders/1P8jTnGqbPlAIwzIfhUhhpE2KKdqW71kT?usp=drive_link
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -275,7 +276,7 @@ def dupltraj(primpeak,secpeak,thirpeak,forpeak,maxovlp,trajstat):
 #just for nicer looking figures
 plt.rcParams.update({'font.size': 8})
 
-# Data files too large to upload to Github. Will link to dryad repository for the same.
+# Data files too large to upload to Github. Data available at https://drive.google.com/drive/folders/1P8jTnGqbPlAIwzIfhUhhpE2KKdqW71kT?usp=drive_link
 
 #data paths - files with all ant paths in a trial
 dir_path1 = 'TBD'
@@ -283,7 +284,7 @@ dir_path1 = 'TBD'
 file1 = ['allpath_11-04','allpath_11-05','allpath_11-09','allpath_11-07','allpath_11-08','allpath_11-22','allpath_11-02','allpath_11-11','allpath_11-14']
 
 #data paths for trial-wise analysis
-dir_path = '/Users/nihavd/Cloud-Drive/'
+dir_path = 'TBD'
 
 folder1 = ['finalpath_11-04/','finalpath_11-05/','finalpath_11-09/','finalpath_11-07/','finalpath_11-08/','finalpath_11-22/','finalpath_11-02/','finalpath_11-11/','finalpath_11-14/']
 #picking inclusion threshold for trial-wise data

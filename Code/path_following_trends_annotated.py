@@ -1,0 +1,583 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import math
+import os
+import csv
+from scipy import signal
+
+def checkfilltraj(basetraj,xp,legrows,mintrajfrac,Hfilt,trajstat,ind):
+# Function to check if the estimated trajectory extends the length of the board. 
+    basetrajfull = basetraj
+    if len(basetraj) >= mintrajfrac*len(legrows):
+    #if the trajectory length is equal to or greater than the minimum length specified by the parameter 'mintrajfunc', then designate as a 'True' trajectory and linearly interpolate any gaps in the trajecotry.
+        trajstat[ind] = True
+        #print(len(xp),len(basetraj))
+        basetrajfull = np.interp(np.arange(Hfilt.shape[1]),xp,basetraj)
+    return basetrajfull,trajstat
+
+def addornot(saccade,peaks,p,hts,*args):
+#Function to determine whether to add a peak to an established trajectory and if so, which trajectory to add it to.
+    if len(args) == 4:
+    # if only 4 input arguments, then the 2 peaks detected must be addded either to the primary or secondary trajectory.
+        primpeak = args[0]
+        x1 = args[1]
+        secpeak = args[2]
+        x2 = args[3]
+        if len(primpeak) == 0:
+        #if there are no trajectories established, then build them from the peaks detected.
+            ind = np.argsort(hts['peak_heights'])[::-1]
+            primpeak = np.append(primpeak,peaks[ind[0]])
+            secpeak = np.append(secpeak,peaks[ind[1]])
+            x1 = np.append(x1,p)
+            x2 = np.append(x2,p)
+        else:
+        #if there are established trajectories, measure the distance from the peaks to the established trajectories starting with the primary trajectory
+            d = np.abs(np.sqrt((peaks-primpeak[-1])**2+(np.ones(len(peaks))*p-x1[-1])**2))
+            dsort = np.sort(d)
+            indd = np.argsort(d)
+            if dsort[0] < saccade:
+            # if the distance of the first peak is less than the parameter 'saccade' which describes the maximum abrupt deviation allowed within a valid trajectory, then add peak to primary trajectory.
+                primpeak = np.append(primpeak,peaks[indd[0]])
+                x1 = np.append(x1,p)
+                if dsort[1] < saccade:
+                # if 2nd peak distance is also less than 'saccade' and secondary trajecory has not been established, then establish secondary trajectory as a branch of first trajectory.   
+                    if len(secpeak) == 0:
+                        x2 = x1
+                        secpeak = np.append(primpeak[0:-1],peaks[indd[1]])
+                elif len(secpeak) == 0:
+                # if 2nd peak distance from primary trajectory is greater than than 'saccade' and secondary trajecory has not been established, then establish secondary trajectory as a separate entity.   
+                    secpeak = np.append(secpeak,peaks[indd[1]])
+                    x2 = np.append(x2,p)
+            #measure distance of peaks from secondary trajectory, if established
+            d = np.abs(np.sqrt((peaks-secpeak[-1])**2+(np.ones(len(peaks))*p-x2[-1])**2))
+            dsort = np.sort(d)
+            indd = np.argsort(d)
+            if (dsort[0] < saccade) and (x2[-1]<p):
+            #if peak distance less than 'saccade' from end of secondary trajectory and the trajectory hasn't been updated above, then add peak to secondary trajectory.
+                secpeak = np.append(secpeak,peaks[indd[0]])
+                x2 = np.append(x2,p)
+        return primpeak, secpeak, x1, x2
+    elif len(args) == 6:
+        # if only 6 input arguments, then the 3 peaks detected must be addded either to the primary, secondary, or tertiary trajectory.
+        primpeak = args[0]
+        x1 = args[1]
+        secpeak = args[2]
+        x2 = args[3]
+        thirpeak = args[4]
+        x3 = args[5]
+        if len(primpeak) == 0:
+        #if no trajectories so far, then begin trajectorues with peaks detected according to height.
+            ind = np.argsort(hts['peak_heights'])[::-1]
+            primpeak = np.append(primpeak,peaks[ind[0]])
+            secpeak = np.append(secpeak,peaks[ind[1]])
+            thirpeak = np.append(thirpeak,peaks[ind[2]])
+            x1 = np.append(x1,p)
+            x2 = np.append(x2,p)
+            x3 = np.append(x3,p)
+        else:
+        # we play the same game of calculating distance from the primary trajectory to all the detected peaks.
+            d = np.abs(np.sqrt((peaks-primpeak[-1])**2+(np.ones(len(peaks))*p-x1[-1])**2))
+            dsort = np.sort(d)
+            indd = np.argsort(d)
+            if dsort[0] < saccade:
+            #if the first peak is less than 'saccade' distance from primary trajectory, add it to primary trajectory
+                primpeak = np.append(primpeak,peaks[indd[0]])
+                x1 = np.append(x1,p)
+                if dsort[1] < saccade:
+                # if no secondary and/or tertiary trajectories and second peak less than 'saccade' from primary trajectory then establish second/tertiary trajectories as branches of primary peak.  
+                    if len(secpeak) == 0:
+                        x2 = x1
+                        secpeak = np.append(primpeak[0:-1],peaks[indd[1]])
+                    elif len(thirpeak) == 0:
+                        x3 = x1
+                        thirpeak = np.append(primpeak[0:-1],peaks[indd[1]])
+                elif len(secpeak) == 0:
+                    secpeak = np.append(secpeak,peaks[indd[1]])
+                    x2 = np.append(x2,p)
+                if dsort[2] < saccade:
+                # if no thirs trajectory, and 3rd peak less than 'saccade' distance from primary trajectory, then establish tertiary trajectory as branch of primary peak.
+                    if len(thirpeak) == 0:
+                        x3 = x1
+                        thirpeak = np.append(primpeak[0:-1],peaks[indd[2]])
+            #calculate distance of detected peaks from secondary trajectory.
+            d = np.abs(np.sqrt((peaks-secpeak[-1])**2+(np.ones(len(peaks))*p-x2[-1])**2))
+            dsort = np.sort(d)
+            indd = np.argsort(d)
+            if (dsort[0] < saccade) and (x2[-1]<p):
+            #if first peak less than saccade distance from secondary trajectory, and peak has not been added to primary trajectory, then append to secondary trajectory.
+                secpeak = np.append(secpeak,peaks[indd[0]])
+                x2 = np.append(x2,p)
+                if dsort[1] <saccade:
+                # if second peak distance less than saccade and there's no tertiary trajectory, then establish tertiary trajectory as a branch of secondary trajectory.
+                    if len(thirpeak) == 0:
+                        x3 = x2
+                        thirpeak = np.append(secpeak[0:-1],peaks[indd[1]])
+                elif len(thirpeak) == 0:
+                #else establish tertiary trajectory as a separate trajectory
+                    thirpeak = np.append(thirpeak,peaks[indd[1]])
+                    x3 = np.append(x3,p)
+            elif len(thirpeak) == 0:
+            #if secondary trajectory is not to be updated, then start tertiary trajectory if not yet established
+                thirpeak = np.append(thirpeak,peaks[indd[1]])
+                x3 = np.append(x3,p)
+            # calculate distance of peaks from established tertiary trajectory
+            d = np.abs(np.sqrt((peaks-thirpeak[-1])**2+(np.ones(len(peaks))*p-x3[-1])**2))
+            dsort = np.sort(d)
+            indd = np.argsort(d)
+            if (dsort[0] < saccade) and (x3[-1]<p):
+                # append to tertairy trajectory if distance to peak less than saccade and tertiary trajectory not yet updated.
+                thirpeak = np.append(thirpeak,peaks[indd[0]])
+                x3 = np.append(x3,p)
+        return primpeak, secpeak, thirpeak, x1, x2, x3
+    elif len(args) == 8:
+    #do similar trajectory update now with 4 peaks and 4 trajectories using the same recursive procedure as described above.
+        primpeak = args[0]
+        x1 = args[1]
+        secpeak = args[2]
+        x2 = args[3]
+        thirpeak = args[4]
+        x3 = args[5]
+        forpeak = args[6]
+        x4 = args[7]
+        if len(primpeak) == 0:
+            ind = np.argsort(hts['peak_heights'])[::-1]
+            primpeak = np.append(primpeak,peaks[ind[0]])
+            secpeak = np.append(secpeak,peaks[ind[1]])
+            thirpeak = np.append(thirpeak,peaks[ind[2]])
+            forpeak = np.append(forpeak,peaks[ind[3]])
+            x1 = np.append(x1,p)
+            x2 = np.append(x2,p)
+            x3 = np.append(x3,p)
+            x4 = np.append(x4,p)
+        else:
+            d = np.abs(np.sqrt((peaks-primpeak[-1])**2+(np.ones(len(peaks))*p-x1[-1])**2))
+            dsort = np.sort(d)
+            indd = np.argsort(d)
+            if dsort[0] < saccade:
+                primpeak = np.append(primpeak,peaks[indd[0]])
+                x1 = np.append(x1,p)
+                if dsort[1] < saccade:
+                    if len(secpeak) == 0:
+                        x2 = x1
+                        secpeak = np.append(primpeak[0:-1],peaks[indd[1]])
+                    elif len(thirpeak) == 0:
+                        x3 = x1
+                        thirpeak = np.append(primpeak[0:-1],peaks[indd[1]])
+                    elif len(forpeak) == 0:
+                        x4 = x1
+                        forpeak = np.append(primpeak[0:-1],peaks[indd[1]])
+                elif len(secpeak) == 0:
+                    secpeak = np.append(secpeak,peaks[indd[1]])
+                    x2 = np.append(x2,p)
+                if dsort[2] < saccade:
+                    if len(thirpeak) == 0:
+                        x3 = x1
+                        thirpeak = np.append(primpeak[0:-1],peaks[indd[2]])
+                    elif len(forpeak) == 0:
+                        x4 = x1
+                        forpeak = np.append(primpeak[0:-1],peaks[indd[2]])
+                if dsort[3] < saccade:
+                    if len(forpeak) == 0:
+                        x4 = x1
+                        forpeak = np.append(primpeak[0:-1],peaks[indd[3]])
+            d = np.abs(np.sqrt((peaks-secpeak[-1])**2+(np.ones(len(peaks))*p-x2[-1])**2))
+            dsort = np.sort(d)
+            indd = np.argsort(d)
+            if (dsort[0] < saccade) and (x2[-1]<p):
+                secpeak = np.append(secpeak,peaks[indd[0]])
+                x2 = np.append(x2,p)
+                if dsort[1] <saccade:
+                    if len(thirpeak) == 0:
+                        x3 = x2
+                        thirpeak = np.append(secpeak[0:-1],peaks[indd[1]])
+                    elif len(forpeak) == 0:
+                        x4 = x2
+                        forpeak = np.append(secpeak[0:-1],peaks[indd[1]])
+                elif len(thirpeak) == 0:
+                    thirpeak = np.append(thirpeak,peaks[indd[1]])
+                    x3 = np.append(x3,p)
+                if dsort[2] < saccade:
+                    if len(forpeak) == 0:
+                        x4 = x2
+                        forpeak = np.append(secpeak[0:-1],peaks[indd[2]])
+            elif len(thirpeak) == 0:
+                thirpeak = np.append(thirpeak,peaks[indd[1]])
+                x3 = np.append(x3,p)
+            d = np.abs(np.sqrt((peaks-thirpeak[-1])**2+(np.ones(len(peaks))*p-x3[-1])**2))
+            dsort = np.sort(d)
+            indd = np.argsort(d)
+            if (dsort[0] < saccade) and (x3[-1]<p):
+                thirpeak = np.append(thirpeak,peaks[indd[0]])
+                x3 = np.append(x3,p)
+                if dsort[1] < saccade:
+                    if len(forpeak) == 0:
+                        x4 = x3
+                        forpeak = np.append(thirpeak[0:-1],peaks[indd[1]])
+                elif len(forpeak) == 0:
+                    forpeak = np.append(forpeak,peaks[indd[1]])
+                    x4 = np.append(x4,p)
+            elif len(forpeak) == 0:
+                forpeak = np.append(forpeak,peaks[indd[1]])
+                x4 = np.append(x4,p)
+            d = np.abs(np.sqrt((peaks-forpeak[-1])**2+(np.ones(len(peaks))*p-x4[-1])**2))
+            dsort = np.sort(d)
+            indd = np.argsort(d)
+            if (dsort[0] < saccade) and (x4[-1]<p):
+                forpeak = np.append(forpeak,peaks[indd[0]])
+                x4 = np.append(x4,p)
+        return primpeak, secpeak, thirpeak, forpeak, x1, x2, x3, x4
+
+def dupltraj(primpeak,secpeak,thirpeak,forpeak,maxovlp,trajstat):
+#function to determine whether branched trajectories are sufficiently separated or not.
+    l = 0
+    for t in trajstat:
+        if t:
+        #choosing true trajectories from primary to quarternary trajectory
+            if l == 0:
+                if trajstat[1]:
+                    #calculate cell-wise horizontal distance between 1st and second trajectories.
+                    d1 = np.abs(primpeak-secpeak)
+                    if len(np.argwhere(d1 == 0)) > maxovlp*len(primpeak):
+                    #if they share the same cells for greater than the allowable amount of overlap, defined by the parameter, 'maxovlp' then designate the secondary trajectory as 'False'
+                        trajstat[1] = False
+                if trajstat[2]:
+                # similar procedure for primary and tertiary trajectory and so on...
+                    d2 = np.abs(primpeak-thirpeak)
+                    if len(np.argwhere(d2 == 0)) > maxovlp*len(primpeak):
+                        trajstat[2] = False
+                if trajstat[3]:
+                    d3 = np.abs(primpeak-forpeak)
+                    if len(np.argwhere(d3 == 0)) > maxovlp*len(primpeak):
+                        trajstat[3] = False 
+            elif l == 1:
+            # now comparing secondary trajectory to tertiary and quarternary
+                if trajstat[2]:
+                    d1 = np.abs(secpeak-thirpeak)
+                    if len(np.argwhere(d1 == 0)) > maxovlp*len(secpeak):
+                        trajstat[2] = False
+                if trajstat[3]:
+                    d2 = np.abs(secpeak-forpeak)
+                    if len(np.argwhere(d2 == 0)) > maxovlp*len(secpeak):
+                        trajstat[3] = False
+            elif l == 2:
+            # comparing tertiary to quarternary
+                if trajstat[3]:
+                    d1 = np.abs(thirpeak-forpeak)
+                    if len(np.argwhere(d1 == 0)) > maxovlp*len(thirpeak):
+                        trajstat[3] = False
+        l = l+1
+    return trajstat
+
+#just for nicer looking figures
+plt.rcParams.update({'font.size': 8})
+
+
+#data paths - files with all ant paths in a trial
+dir_path1 = '/Users/nihavd/Cloud-Drive/allpaths'
+
+file1 = ['allpath_11-04','allpath_11-05','allpath_11-09','allpath_11-07','allpath_11-08','allpath_11-22','allpath_11-02','allpath_11-11','allpath_11-14']
+
+#data paths for trial-wise analysis
+dir_path = '/Users/nihavd/Cloud-Drive/'
+
+folder1 = ['finalpath_11-04/','finalpath_11-05/','finalpath_11-09/','finalpath_11-07/','finalpath_11-08/','finalpath_11-22/','finalpath_11-02/','finalpath_11-11/','finalpath_11-14/']
+#picking inclusion threshold for trial-wise data
+#file = 'thresh_70.csv'
+
+B_hists = pd.DataFrame()
+
+#choosing cell size for discretizing board.
+cell = 5
+
+#choosing window size for moving Gaussing filter
+window = 5
+#Gaussian filter params for variance
+sigma = window/2
+#Gaussian filter params for peak of distribution within window
+c = (window-1)/2
+#Gaussian filter params for size of peak
+A = 1/window
+
+#params for peak detection and trajectory update parameters for each trial. Heurestically determined
+
+#minimum height to be registered as a peak
+pkht = [0.12,0.12,0.12,0.12,0.12,0.09,0.09,0.09,0.12,0.09]
+
+#minimum prominence to be registered as a peak
+prm = [0.08,0.08,0.08,0.08,0.08,0.07,0.06,0.06,0.09,0.06]
+
+#minimum distance between peaks to be registered as independent peaks
+pkdist = [10,10,10,10,10,20,10,10,10]
+
+#maximum distance allowed between an established trail and a peak to be counted as part of the same trajectory. this parameter is designed to compensate for localised loss in detection of ant paths from raw data.
+saccade = [20,20,20,20,20,15,25,25,25]
+
+#minimum trajectory length as fraction of board length for the trajectory to be counted as a valid trajectory
+mintrajfrac = [0.7,0.7,0.7,0.7,0.7,0.7,0.8,0.8,0.8]
+
+#maximum allowable overlap between brached trajectories for them to be counted as a 2 separate trajectories
+maxovlp = [0.3,0.3,0.3,0.7,0.7,0.7,0.4,0.7,0.7]
+
+#defining gaussian moving filter
+filt = np.zeros((window,window))
+for i in range(window):
+    for j in range(window):
+        filt[i,j] = A*math.exp(-((i-c)**2+(j-c)**2)/(2*sigma))
+
+for i in range(len(folder1)):
+    #doing analysis trial-by-trial
+    
+    #First breaking-up the trial by percentile times
+    if i == 3:
+    # special case of changing the in-trial cut-offs because of fewer trajectories in the trial
+        cutoff = np.arange(25,95,5)
+    else:
+        cutoff = np.arange(5,95,5)
+    ncut = 0
+    #defining zero vectors for distance scores
+    medscore = np.zeros(len(cutoff))
+    iqrscore = np.zeros(len(cutoff))
+    
+    df = pd.read_csv(dir_path1+"/"+file1[i]+".csv",sep=',')
+        
+    #loading all x-y ants paths including incomplete ones
+    xall = df['x'].to_numpy()
+    yall = df['y'].to_numpy()
+
+    #defining the spatial extent of the data using all paths
+    minx = np.amin(xall)
+    maxx = np.amax(xall)
+    miny = np.amin(yall)
+    maxy = np.amax(yall)
+    xedges = np.arange(minx,maxx+cell,cell)
+    yedges = np.arange(miny,maxy+cell,cell)
+    
+    for cut in cutoff:
+    #performing trajectory/trail detection analysis at each percentile cutoff within the trial time
+    
+        #loading only valid ant paths  
+        anttraj = pd.read_csv(dir_path+folder1[i]+file,sep=',')
+        antnum = anttraj['Antnumber'].to_numpy()
+        #determining number of ant paths
+        numant = int(np.amax(antnum))
+        startt = np.zeros(numant)
+        antdat = pd.DataFrame()
+        for j in range(numant):
+        #ant-by-ant analysis    
+            ant = anttraj.loc[anttraj['Antnumber']==j]
+            antno = ant['Antnumber'].to_numpy()
+            tim = ant['time'].to_numpy()
+            #determining when in the trail this particular ant path was observed
+            startt[j] = tim[0]
+            starts = np.ones(tim.size)*startt[j]
+            x = ant['x'].to_numpy()
+            y = ant['y'].to_numpy()
+            #loading ant path coordinates and start time into data frame.
+            dat = np.transpose([antno,starts,tim,x,y])
+            temp = pd.DataFrame(data = dat,columns = ['Antnumber','Starttime','time','x','y'])
+            antdat = pd.concat([antdat,temp])
+
+        #sorting data frame by start time of ant path within the trial
+        antdat.sort_values(by=['Starttime'])
+        antorder = np.argsort(startt)
+        mintrajt = np.amin(startt)
+        maxtrajt = np.amax(startt)
+        startt = np.sort(startt)
+
+        #finding the trial time corresponding to the cut-off percentile
+        groundtime = startt[round(cut*len(startt)/100)-1]
+
+        #choosing only those ant trajectories which start earlier than the cut-off time
+        allgroundtraj = antdat.loc[antdat['Starttime']<=groundtime]
+        grndant = allgroundtraj['Antnumber'].to_numpy()
+        #determining the ant ids corresponding to those trajectories
+        grndant = np.unique(grndant)
+        
+        #defining a zero 2D array for ant occupancy histograms
+        Hbase = np.zeros((len(xedges)-1,len(yedges)-1))
+
+        for k in grndant:
+        #ant-by-ant selecting the ant path coordinates
+            grndtraj = allgroundtraj.loc[allgroundtraj['Antnumber']==k]
+            x = grndtraj['x'].to_numpy()
+            y = grndtraj['y'].to_numpy()
+            #creating occupancy histograms for that particular path
+            H, xedges, yedges = np.histogram2d(x,y,bins = (xedges,yedges))
+            #ensuring these are occupancy histograms and not reflective of time spent in a cell
+            H[H > 1] = 1
+            #cumulative occupancy histograms for all paths
+            Hbase = Hbase + H
+
+        #normalizing cumualative occupancy histogram.
+        Hbase = Hbase/np.amax(Hbase)
+
+        #padding the histogram for performing the moving Gaussian filtering
+        Hbig = np.zeros((len(xedges)+window-2,len(yedges)+window-2))
+        recurrind = int((window-1)/2)
+        falloff = (np.exp(-np.arange(0,recurrind))*np.exp(-np.arange(0,recurrind))).reshape(recurrind,1)
+        falloffsq = np.matmul(falloff,np.transpose(falloff))
+        Hbig[recurrind:-recurrind,recurrind:-recurrind] = Hbase
+        Hbig[0:recurrind,0:recurrind] = Hbase[0,0]*np.flipud(np.fliplr(falloffsq))
+        Hbig[0:recurrind,-recurrind:] = Hbase[recurrind,-recurrind]*np.flipud(falloffsq)
+        Hbig[-recurrind:,-recurrind:] = Hbase[-recurrind,-recurrind]*falloffsq
+        Hbig[-recurrind:,0:recurrind] = Hbase[-recurrind,recurrind]*np.fliplr(falloffsq)
+        Hbig[recurrind:-recurrind,0:recurrind] = np.matmul(Hbase[:,recurrind].reshape(len(Hbase),1),np.transpose(np.fliplr(falloff)))
+        Hbig[recurrind:-recurrind,-recurrind:] = np.matmul(Hbase[:,-recurrind].reshape(len(Hbase),1),np.transpose(falloff))
+        Hbig[0:recurrind,recurrind:-recurrind] = np.matmul(np.flipud(falloff),Hbase[recurrind,:].reshape(1,Hbase.shape[1]))
+        Hbig[-recurrind:,recurrind:-recurrind] = np.matmul(falloff,Hbase[-recurrind,:].reshape(1,Hbase.shape[1]))
+
+        #performing the filtering
+        Hfilt = signal.convolve2d(Hbig,filt,mode='valid')
+
+        #defining upto 4 trail/trajectories that ants could be following. 'x' variables define the row and 'peak' variables define the column where the peak occurs. Ants travel up from row 0 at the bottom of the board to the top of the board.
+        primpeak = np.array([])
+        x1 = np.array([])
+        secpeak = np.array([])
+        x2 = np.array([])
+        thirpeak = np.array([])
+        x3 = np.array([])
+        forpeak = np.array([])
+        x4 = np.array([])
+        
+        #finding highest peaks in the occupancy histogram
+        rmax = np.amax(Hfilt,axis = 0)
+        #finding rows where those peaks occur if greater than minimum peak height
+        legrows = np.argwhere(rmax > pkht[i]*np.amax(Hfilt))
+        
+        for p in legrows:
+        #going row-by-row to determine which trajectories to add peaks to
+        
+            #finding all peaks in that row that meet height, prominence and distance between peak criteria.
+            peaks, hts = signal.find_peaks(Hfilt[:,int(p)],height = pkht[i]*np.amax(Hfilt),prominence=prm[i]*np.amax(Hfilt),distance=pkdist[i])
+
+            if len(peaks) == 1:
+            #if only peak found    
+                if len(primpeak) > 1:
+                # and if 1st trajectory already established, then append to 1st trajectory if distance between peak and trajectory is less than 'saccade'
+                    d = np.abs(np.sqrt((peaks-primpeak[-1])**2+(p-x1[-1])**2))
+                    if (d < saccade[i]):
+                        primpeak = np.append(primpeak,peaks)
+                        x1 = np.append(x1,p)
+                else: 
+                #if no first peak, then start trajectory with this peak    
+                    primpeak = np.append(primpeak,peaks)
+                    x1 = np.append(x1,p)
+            elif len(peaks) == 2:
+                #if two peaks, then add peaks to either primary and secondary trajectory
+                primpeak,secpeak, x1, x2 = addornot(saccade[i],peaks,p,hts,primpeak,x1,secpeak,x2)
+            elif len(peaks) == 3:
+            #similar for 3 peaks and primary, secondary and tertiary
+,x1,x2,x3 = addornot(saccade[i],peaks,p,hts,primpeak,x1,secpeak,x2,thirpeak,x3)
+            else:
+             #similar for 4 peaks and primary, secondary, tertiary and quarternary
+                primpeak,secpeak,thirpeak,forpeak,x1,x2,x3,x4 = addornot(saccade[i],peaks,p,hts,primpeak,x1,secpeak,x2,thirpeak,x3,forpeak,x4)              
+
+        #define all trajectories as False
+        trajstat = np.array([0,0,0,0])
+        trajstat = np.array(trajstat, dtype='bool')
+        
+        #check if all trajectories are long enough as determined by the 'mintrajfrac' parameter
+        
+        primpeak, trajstat = checkfilltraj(primpeak,x1,legrows,mintrajfrac[i],Hfilt,trajstat,0)
+    
+        secpeak, trajstat = checkfilltraj(secpeak,x2,legrows,mintrajfrac[i],Hfilt,trajstat,1)
+        
+        thirpeak, trajstat = checkfilltraj(thirpeak,x3,legrows,mintrajfrac[i],Hfilt,trajstat,2)
+        
+        forpeak, trajstat = checkfilltraj(forpeak,x4,legrows,mintrajfrac[i],Hfilt,trajstat,3)
+        
+        #check for trajectories with too much overlap as determined by the 'maxovlp' parameter
+        trajstat = dupltraj(primpeak,secpeak,thirpeak,forpeak,maxovlp[i],trajstat)
+    
+        #Piece of code to check final estimated trajectories
+        #l = 0
+        #for t in trajstat:
+        #    if t:
+        #        if l == 0:
+        #            traj = primpeak
+        #        elif l == 1:
+        #            traj = secpeak
+        #        elif l == 2:
+        #            traj = thirpeak
+        #        else:
+        #            traj = forpeak
+        #        #plt.plot(traj,np.arange(0,len(traj)))
+        #    l = l+1
+        
+        #Now that we've established the trajectories upto time 'groundtime', we calcuate the distance between these trajectories and ant paths after time 'groundtime'
+        
+        #picking ant paths that start after 'groundtime'.
+        alltesttraj = antdat.loc[antdat['Starttime']>groundtime]
+        testant = alltesttraj['Antnumber'].to_numpy()
+        testant = np.unique(testant)
+        
+        #defining a distance score variable
+        Dtraj = np.zeros(len(testant))
+        kind = 0
+        for k in testant:
+        #going ant-by-ant
+            testtraj = alltesttraj.loc[alltesttraj['Antnumber']==k]
+            
+            #loading ant path coordinate data
+            x = testtraj['x'].to_numpy()
+            y = testtraj['y'].to_numpy()
+            bigd = np.zeros(len(y))
+            for ind in range(len(y)):
+            #going row-by-row in the ant path coordinates
+                mind = 1000
+                l = 0
+                for t in trajstat:
+                    if t:
+                        if l == 0:
+                            xtraj = primpeak*cell+minx
+                        elif l == 1:
+                            xtraj = secpeak*cell+minx
+                        elif l == 2:
+                            xtraj = thirpeak*cell+minx
+                        else:
+                            xtraj = forpeak*cell+minx
+                        ytraj = np.arange(0,len(traj))*cell+miny;
+                        
+                        #determining min distance from each point on the ant path to the established trail/trajectory
+                        d = np.amin(((xtraj-x[ind])**2+(ytraj-y[ind])**2)**0.5)
+                        mind = min(d,mind)
+                        
+                    l = l+1
+                # array that carries min distance from each cell
+                bigd[ind] = mind
+            #defining mean distance from one ant path to it's closest trajectory(ies) and storing it one cell of Dtraj
+            Dtraj[kind] = np.mean(bigd)
+            kind = kind + 1
+        
+        # Calculating median and interquartile distance across all trajectories for this particular cut-off
+        medscore[ncut] = np.median(Dtraj)
+        iqrscore[ncut] = np.percentile(Dtraj,75)-np.percentile(Dtraj,25)
+        
+        ncut = ncut + 1
+    
+    
+    # having calculated medscore and iqrscore for every percentile cut-off within a trial, plot it for that trial.
+    plt.subplot(211)
+    
+    plt.plot(cutoff,medscore)
+    plt.xlim([0,100])
+    plt.ylim([0, 40])
+    plt.xticks(labels=None)
+    #plt.xlabel('cutoff percentage')
+    plt.ylabel('median score (mm)')
+    plt.box(False)
+    
+    plt.subplot(212)
+    plt.plot(cutoff,iqrscore)
+    plt.xlim([0,100])
+    plt.ylim([0, 40])
+    plt.xlabel('trial time percentage')
+    plt.ylabel('iqr score (mm)')
+    plt.box(False)
+
+
+# legend for all trials
+leg = ['0 deg (T1)','0 deg (T2)','0 deg (T3)','50 deg (T1)','50 deg (T2)','50 deg (T3)','85 deg (T1)','85 deg (T2)','85 deg (T3)']
+plt.legend(leg)
+plt.show(block = True)
